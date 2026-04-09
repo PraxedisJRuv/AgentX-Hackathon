@@ -5,6 +5,7 @@ from utils import create_db_and_tables, get_session, save_image, parse_images_to
 from clients import JiraClient
 from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 from langgraph.graph.state import CompiledStateGraph
@@ -39,6 +40,14 @@ REPORT_LOG_VALUES = {
 
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def put_report_status(report_id: str, status_id: str, session: Session):
@@ -159,3 +168,21 @@ def delete_report(report_id: str, session: SessionDep):
     session.delete(report)
     session.commit()
     return {"ok": True}
+
+
+@app.get("/reports/{report_id}/statuses")
+def read_report_statuses(report_id: str, session: SessionDep) -> list[dict]:
+    report = session.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    statuses = session.exec(
+        select(ReportStatus).where(ReportStatus.report_id == report_id)
+    ).all()
+    return [
+        {
+            "status_id": s.status_id,
+            "text": REPORT_LOG_VALUES.get(str(s.status_id), "Unknown status"),
+            "created_at": s.created_at,
+        }
+        for s in statuses
+    ]

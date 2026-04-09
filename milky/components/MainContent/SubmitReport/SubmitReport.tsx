@@ -1,11 +1,17 @@
 import { useState } from "react";
+import { createReport, runReport } from "../../../lib/api";
 
-export default function SubmitReport() {
+type Props = {
+  onSubmitted?: (reportId: string) => void;
+};
+
+export default function SubmitReport({ onSubmitted }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState(new Date().toLocaleDateString());
   const [image, setImage] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -14,25 +20,37 @@ export default function SubmitReport() {
     }
   }
 
-  async function handleSubmit() {
-    if (!title || !description || !date || !image) return;
-    setLoading(true);
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Strip the data URL prefix (e.g. "data:image/jpeg;base64,")
+        resolve(result.split(",")[1]);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
 
-    const formData = new FormData();
-    formData.append("title", title);
-    formData.append("description", description);
-    formData.append("date", date);
-    formData.append("image", image); // As binary
+  async function handleSubmit() {
+    if (!title || !description || !date) return;
+    setLoading(true);
+    setError(null);
 
     try {
-      const res = await fetch("jejenohayendpoint", {
-        method: "POST",
-        body: formData,
+      const images_base64 = image ? [await fileToBase64(image)] : [];
+      const { report_id } = await createReport({
+        name: title,
+        description,
+        issue_date: date,
+        images_base64,
       });
-      const data = await res.json();
-      console.log(data);
+      // Fire-and-forget the agent run; don't await the full SSE stream
+      runReport(report_id).catch(() => {});
+      onSubmitted?.(report_id);
     } catch (err) {
-      console.error(err);
+      setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -62,6 +80,7 @@ export default function SubmitReport() {
         onChange={(e) => setDescription(e.target.value)}
         className="bg-[#A3CEF1] text-[#282A23] rounded p-2 h-9/12"
       />
+      {error && <p className="text-red-600 text-sm">{error}</p>}
       <div className="flex justify-between p-5 h-2/12 text-[#000000]">
         <input type="file" accept="image/*" onChange={handleImage} />
         <button
