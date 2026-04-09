@@ -198,7 +198,7 @@ cython_debug/
 
 backend/database.db
 backend/images/
-
+muy_mala_calidad.jpg
 llm/
 llm
 /llm/
