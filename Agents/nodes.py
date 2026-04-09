@@ -98,7 +98,9 @@ def evaluate_report(state: ReportState) -> ReportState:
 def generate_image_instruction(state: ReportState) -> ReportState:
 
     system = SystemMessage(content=(
+
         "Las instrucciones para el análisis. Especificar el JSON y que no debe salirse"
+        
     ))
     human = HumanMessage(content=f"Report text:\n{state['text']}")
 

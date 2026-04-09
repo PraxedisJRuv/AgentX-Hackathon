@@ -44,10 +44,28 @@ def read_json():
     return 0
 
 
+def run_report(text: str,image_path: Optional[str] = None,edit_count: int = 0,) -> ReportState:
+    
+    image_b64, image_mime = (None, None)
+    
+    """
+    if image_path:
+        image_b64, image_mime = load_image(image_path)
 
-
-
-
+    """
+    initial_state: ReportState = {
+        "text": text,
+        "image_b64": image_b64,
+        "image_mime": image_mime,
+        "urgency_level": None,
+        "image_required": None,
+        "image_instruction": None,
+        "image_condition_met": None,
+        "edit_count": edit_count,
+        "final_solution": None,
+        "status": None,
+        "messages": [],
+    }
 
 
 def build_graph() -> StateGraph:
@@ -71,8 +89,7 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # Después de pedir imagen el usuario debe re-enviar → volver a evaluar
-    graph.add_edge("request_image", END)  # Interrupción: espera al usuario
+    graph.add_edge("request_image", END) 
 
     # Cadena de análisis de imagen
     graph.add_edge("generate_image_instruction", "analyze_image")
