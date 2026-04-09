@@ -8,10 +8,17 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 import json
 
+import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain.agents import create_agent
+
 
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0,api_key=api_key)
+
+GITHUB_TOKEN = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+GITHUB_REPO  = "reactioncommerce/reaction"
 
 MAX_EDITS = 3
 
@@ -186,7 +193,7 @@ def analyze_image(state: ReportState) -> ReportState:
     }
 
 
-def propose_solution(state: ReportState) -> ReportState:
+async def propose_solution(state: ReportState) -> ReportState:
     print("at propose solution")
     context_parts = [
         f"report text:\n{state['text']}",
@@ -196,20 +203,49 @@ def propose_solution(state: ReportState) -> ReportState:
         context_parts.append(f"image analysis: {state.get('image_instruction')}")
 
     context = "\n\n".join(context_parts)
-
-    system = SystemMessage(content=(
+    mcp_client=MultiServerMCPClient({
+    "github": {
+        "command": "docker",
+        "args": [
+            "run", "-i", "--rm",
+            "-e", f"GITHUB_PERSONAL_ACCESS_TOKEN={GITHUB_TOKEN}",
+            "ghcr.io/github/github-mcp-server"
+        ],
+        "transport": "stdio",
+         }
+    })
         
-        "Eres un experto en gestión de incidentes. "
-        "Basándote en el reporte proporcionado, genera una solución clara, "
-        "estructurada y accionable para resolver el problema. "
-        "Considera el nivel de urgencia en tu respuesta."
-    
-    ))
+    github_tools = await mcp_client.get_tools()
+    print(f"Herramientas disponibles: {[t.name for t in github_tools]}")
 
-    human = HumanMessage(content=context)
-    response = llm.invoke([system, human])
-    print(f"reponse: {response}")
-    solution = response.content
+
+    system_prompt=(
+        
+        "Eres un experto en gestión de incidentes y desarrollo de software. "
+            f"Tienes acceso al repositorio de GitHub '{GITHUB_REPO}' mediante herramientas. "
+            "ANTES de proponer una solución, debes:\n"
+            "  1. Explorar la estructura del repositorio.\n"
+            "  2. Leer los archivos más relevantes para el problema reportado.\n"
+            "  3. Entender el código real de la aplicación.\n\n"
+            "Luego, genera una solución clara, estructurada y accionable que "
+            "referencie archivos y fragmentos de código específicos del repositorio. "
+            "Considera el nivel de urgencia en tu respuesta."
+
+    )
+    agent = create_agent(
+            model=llm,
+            tools=github_tools,
+            system_prompt=system_prompt
+        )
+    
+    print(" explorando repositorio")
+    result = await agent.ainvoke({
+            "messages": [HumanMessage(content=context)]
+        })
+    
+    solution = result["messages"][-1].content
+    print(f" Solución generada ({len(solution)} chars)")
+
     return {
         **state,
         "final_solution": solution,
@@ -314,7 +350,7 @@ def load_image_as_b64(path: str) -> tuple[str, str]:
     return data, mime
 
 
-def run_report( text: str, image_path: Optional[str] = None, edit_count: int = 0,) -> ReportState:
+async def run_report( text: str, image_path: Optional[str] = None, edit_count: int = 0,) -> ReportState:
 
     image_b64, image_mime = (None, "image/jpeg")
     if image_path:
@@ -334,19 +370,20 @@ def run_report( text: str, image_path: Optional[str] = None, edit_count: int = 0
         "messages": [],
     }
 
-    result = compiled_graph.invoke(initial_state)
+    result = await compiled_graph.ainvoke(initial_state)
     return result
 
+if __name__=="__main__":
 
-sample_text = (
-        "Mi Patricio Estrella viene dañado, se ve extraño. No coincide con la foto de la tienda."
-    )
+    sample_text = (
+            "La página es demasiado lenta al revisar los productos."
+        )
 
-state1 = run_report(text=sample_text,image_path="muy_mala_calidad.jpg",)
-print(state1)
+    state1 = asyncio.run(run_report(text=sample_text,image_path=None,))
+    print(state1)
 
-"""
-for msg in state1["messages"]:
-        role = "IAlexis" if isinstance(msg, AIMessage) else "Humano"
-        print(f"{role}: {msg.content}\n")
-"""
+    """
+    for msg in state1["messages"]:
+            role = "IAlexis" if isinstance(msg, AIMessage) else "Humano"
+            print(f"{role}: {msg.content}\n")
+    """
