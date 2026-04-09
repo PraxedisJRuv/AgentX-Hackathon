@@ -1,5 +1,6 @@
 from sqlmodel import Session, SQLModel, create_engine
 import base64
+import json
 import os
 
 sqlite_file_name = "database.db"
@@ -38,3 +39,17 @@ def parse_images_to_b64(images_path: str) -> str:
             b64_images.append(base64.b64encode(f.read()).decode("utf-8"))
     return b64_images
 
+
+def read_json(text: str) -> dict:
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start == -1 or end == 0:
+        raise ValueError(f"No se encontró JSON en: {text}")
+    return json.loads(text[start:end])
+
+
+def build_image_for_API(b64:str, mime:str)-> dict:
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime};base64,{b64}"},
+    }

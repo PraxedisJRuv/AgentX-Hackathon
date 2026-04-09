@@ -1,4 +1,5 @@
-from agent import report_graph
+from agent.graph import graph
+from agent.schema import ReportState
 from models import Report, ReportCreate, ReportRead, ReportStatusCreate, ReportStatus
 from utils import create_db_and_tables, get_session, save_image, parse_images_to_b64
 from clients import JiraClient
@@ -23,7 +24,7 @@ async def lifespan(app: FastAPI):
     global report_agent
     global jira_client
     create_db_and_tables()
-    report_agent = report_graph
+    report_agent = graph.compile()
     jira_client = JiraClient()
     yield
 
@@ -35,6 +36,7 @@ REPORT_LOG_VALUES = {
     "4": "The issue has been taken on by a team member",
     "5": "The issue has been resolved",
 }
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -112,7 +114,21 @@ async def run_report(report_id: str, session: SessionDep):
 
     async def event_generator():
         try:
-            async for chunk in report_agent.astream({"report_id": report_id, "logs": []}, stream_mode="updates"):
+            initial_state: ReportState = {
+                "text": report.description,
+                "image_b64": parse_images_to_b64(report.images_path)[0] if report.images_path else None,
+                "image_mime": "image/jpeg" if report.images_path else None,
+                "urgency_level": None,
+                "image_required": None,
+                "image_instruction": None,
+                "image_condition_met": None,
+                "edit_count": 0,
+                "final_solution": None,
+                "status": None,
+                "messages": [],
+            }
+
+            async for chunk in report_agent.astream(initial_state, stream_mode="updates"):
                 yield f"data: {json.dumps(chunk, default=str)}\n\n"
             report.status = "submitted"
             session.add(report)
