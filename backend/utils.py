@@ -37,3 +37,4 @@ def parse_images_to_b64(images_path: str) -> str:
         with open(path, "rb") as f:
             b64_images.append(base64.b64encode(f.read()).decode("utf-8"))
     return b64_images
+

@@ -31,8 +31,16 @@ class ReportRead(ReportBase):
     images_b64: list[str] | None = Field(default=None)
 
 
+class ReportStatusBase(SQLModel):
+    report_id: str = Field(index=True)
+    status_id: int
+
+
 class ReportStatus(SQLModel, table=True):
     id: str | None = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     report_id: str = Field(index=True)
     status_id: int
     created_at: str | None = Field(default_factory=lambda: datetime.today().isoformat())
+
+class ReportStatusCreate(ReportStatusBase):
+    pass

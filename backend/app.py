@@ -1,11 +1,14 @@
-from models import Report, ReportCreate, ReportRead, ReportStatus
+from agent import report_graph
+from models import Report, ReportCreate, ReportRead, ReportStatusCreate, ReportStatus
 from utils import create_db_and_tables, get_session, save_image, parse_images_to_b64
+from clients import JiraClient
 from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 from langgraph.graph.state import CompiledStateGraph
 from contextlib import asynccontextmanager
+from datetime import datetime
 import base64
 import json
 import os
@@ -13,14 +16,35 @@ import os
 SessionDep = Annotated[Session, Depends(get_session)]
 
 report_agent: CompiledStateGraph = None
+jira_client: JiraClient = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global report_agent
+    global jira_client
     create_db_and_tables()
+    report_agent = report_graph
+    jira_client = JiraClient()
     yield
 
 
+REPORT_LOG_VALUES = {
+    "1": "Report received",
+    "2": "Report analysed",
+    "3": "The responsible team has been notified",
+    "4": "The issue has been taken on by a team member",
+    "5": "The issue has been resolved",
+}
+
 app = FastAPI(lifespan=lifespan)
+
+
+def put_report_status(report_id: str, status_id: str, session: Session):
+    status = ReportStatus(report_id=report_id, status_id=status_id)
+    session.add(status )
+    session.commit()
+    session.refresh(status)
+    return {"message": "Report status updated successfully"}
 
 
 @app.get("/reports/")
@@ -64,22 +88,42 @@ def create_report(report: ReportCreate, session: SessionDep) -> dict:
     session.commit()
     session.refresh(db_report)
 
+    put_report_status(db_report.id, "1", session)
+
     return {"message": "Report created successfully", "report_id": db_report.id}
 
 
-@app.get("/reports/{report_id}/stream")
-async def stream_report(report_id: str, session: SessionDep):
-    """Start the LangGraph agent for this report and stream SSE update chunks."""
+@app.post("/reports/{report_id}/run")
+async def run_report(report_id: str, session: SessionDep):
     report = session.get(Report, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     if not report_agent:
         raise HTTPException(status_code=503, detail="Agent not initialized")
+    if report.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Report status must be 'pending' to run. Current status: {report.status}")
+
+    report.status = "processing"
+    report.updated_at = datetime.today().isoformat()
+    session.add(report)
+    session.commit()
+
+    put_report_status(report_id, "2", session)
 
     async def event_generator():
-        async for chunk in report_agent.astream(report_id, stream_mode="updates"):
-            yield f"data: {json.dumps(chunk, default=str)}\n\n"
-        yield "event: done\ndata: {}\n\n"
+        try:
+            async for chunk in report_agent.astream({"report_id": report_id, "logs": []}, stream_mode="updates"):
+                yield f"data: {json.dumps(chunk, default=str)}\n\n"
+            report.status = "submitted"
+            session.add(report)
+            session.commit()
+
+            yield "event: done\ndata: {}\n\n"
+        except Exception as e:
+            report.status = "failed"
+            session.add(report)
+            session.commit()
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
 
     return StreamingResponse(
         event_generator(),
