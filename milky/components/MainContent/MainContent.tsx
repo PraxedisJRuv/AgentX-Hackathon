@@ -10,7 +10,7 @@ export default function MainContent({
   }) {
 
   return (
-    <div className="col-span-3 row-span-9 row-start-2 m-5 p-5 bg-black">
+    <div className="col-span-3 row-span-9 row-start-2 m-5 p-5">
       {activeContent === "Submit report" && <SubmitReport />}
       {activeContent === "Report history" && <ReportHistory />}
       {activeContent === "Report status" && <ReportStatus />}
