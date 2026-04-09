@@ -2,13 +2,17 @@ from models import Report, ReportCreate, ReportRead, ReportStatus
 from utils import create_db_and_tables, get_session, save_image, parse_images_to_b64
 from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
+from langgraph.graph.state import CompiledStateGraph
 from contextlib import asynccontextmanager
 import base64
+import json
 import os
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
+report_agent: CompiledStateGraph = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -59,7 +63,32 @@ def create_report(report: ReportCreate, session: SessionDep) -> dict:
     session.add(db_report)
     session.commit()
     session.refresh(db_report)
+
     return {"message": "Report created successfully", "report_id": db_report.id}
+
+
+@app.get("/reports/{report_id}/stream")
+async def stream_report(report_id: str, session: SessionDep):
+    """Start the LangGraph agent for this report and stream SSE update chunks."""
+    report = session.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if not report_agent:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+
+    async def event_generator():
+        async for chunk in report_agent.astream(report_id, stream_mode="updates"):
+            yield f"data: {json.dumps(chunk, default=str)}\n\n"
+        yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.delete("/reports/{report_id}")
