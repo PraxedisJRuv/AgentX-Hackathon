@@ -132,8 +132,11 @@ celerybeat.pid
 .venv
 env/
 venv/
+.myenv
+myenv/
 ENV/
 env.bak/
+myenv.bak/
 venv.bak/
 .vscode
 .vscode/
@@ -195,3 +198,7 @@ cython_debug/
 
 backend/database.db
 backend/images/
+
+llm/
+llm
+/llm/
